@@ -236,4 +236,5 @@ plt.plot(lstm_check, label='LSTM 准确率', color='m')
 #plt.yscale('log')  # 使用对数坐标更清晰
 plt.legend()
 plt.grid(True)
+
 plt.show()
