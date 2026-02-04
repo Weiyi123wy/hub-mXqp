@@ -1,0 +1,125 @@
+import pandas as pd
+import numpy as np
+import torch
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder
+from transformers import BertTokenizer, BertForSequenceClassification, Trainer, TrainingArguments
+from datasets import Dataset
+
+data = {
+    'text': [
+        "人工智能大模型的发展推动了科技行业的变革",
+        "量子计算技术取得新突破，算力提升百倍",
+        "新能源汽车销量同比增长20%，产业链受益",
+        "央行下调利率，提振市场信心",
+        "某上市公司年报显示净利润增长15%",
+        "电影票房突破50亿，创春节档新纪录",
+        "某明星发布新专辑，首日销量破百万",
+        "虚拟现实技术在游戏领域的应用越来越广泛",
+        "黄金价格受国际局势影响大幅波动",
+        "综艺节目收视率创新高，引发全网热议",
+        "5G基站建设完成数超预期，覆盖全国主要城市",
+        "房地产行业政策调整，多地放松限购",
+        "演唱会门票秒空，粉丝热情高涨",
+        "芯片国产化进程加速，减少对外依赖",
+        "股市大盘上涨，金融板块领涨"
+    ],
+    'label': [
+        "科技", "科技", "财经", "财经", "财经",
+        "娱乐", "娱乐", "科技", "财经", "娱乐",
+        "科技", "财经", "娱乐", "科技", "财经"
+    ]
+}
+
+df = pd.DataFrame(data)
+df.to_csv("text_classification_dataset.csv", index=False, encoding='utf-8')
+
+df = pd.read_csv("text_classification_dataset.csv", encoding='utf-8')
+
+label_encoder = LabelEncoder()
+df['label_id'] = label_encoder.fit_transform(df['label'])
+
+train_texts, test_texts, train_labels, test_labels = train_test_split(
+    df['text'].tolist(),
+    df['label_id'].tolist(),
+    test_size=0.2,
+    stratify=df['label_id'],
+    random_state=42
+)
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-chinese')
+model = BertForSequenceClassification.from_pretrained(
+    'bert-base-chinese',
+    num_labels=len(label_encoder.classes_)
+)
+
+train_encodings = tokenizer(train_texts, truncation=True, padding=True, max_length=64)
+test_encodings = tokenizer(test_texts, truncation=True, padding=True, max_length=64)
+
+train_dataset = Dataset.from_dict({
+    'input_ids': train_encodings['input_ids'],
+    'attention_mask': train_encodings['attention_mask'],
+    'labels': train_labels
+})
+
+test_dataset = Dataset.from_dict({
+    'input_ids': test_encodings['input_ids'],
+    'attention_mask': test_encodings['attention_mask'],
+    'labels': test_labels
+})
+
+def compute_metrics(eval_pred):
+    logits, labels = eval_pred
+    predictions = np.argmax(logits, axis=-1)
+    accuracy = (predictions == labels).mean()
+    return {'accuracy': accuracy}
+
+training_args = TrainingArguments(
+    output_dir='./bert_text_classification',
+    num_train_epochs=10,
+    per_device_train_batch_size=4,
+    per_device_eval_batch_size=4,
+    warmup_steps=10,
+    weight_decay=0.01,
+    logging_dir='./logs',
+    logging_steps=5,
+    eval_strategy="epoch",
+    save_strategy="epoch",
+    load_best_model_at_end=True,
+    seed=42
+)
+
+trainer = Trainer(
+    model=model,
+    args=training_args,
+    train_dataset=train_dataset,
+    eval_dataset=test_dataset,
+    compute_metrics=compute_metrics
+)
+
+trainer.train()
+
+eval_results = trainer.evaluate()
+print(f"测试集准确率: {eval_results['eval_accuracy']:.4f}")
+
+def predict_text_category(text):
+    encoding = tokenizer(text, truncation=True, padding=True, max_length=64, return_tensors='pt')
+    with torch.no_grad():
+        outputs = model(**encoding)
+    logits = outputs.logits
+    pred_label_id = torch.argmax(logits, dim=1).item()
+    pred_label = label_encoder.inverse_transform([pred_label_id])[0]
+    return pred_label
+
+test_samples = [
+    "国产大模型在医疗领域的应用落地",
+    "央行宣布降准0.5个百分点，释放流动性",
+    "某顶流明星官宣新剧，预约量破千万",
+    "半导体行业迎来政策红利，相关企业股价上涨"
+]
+
+print("\n新样本分类结果：")
+for sample in test_samples:
+    pred = predict_text_category(sample)
+    print(f"文本: {sample}")
+    print(f"预测类别: {pred}\n")
